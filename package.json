@@ -1,0 +1,12 @@
+{
+  "name": "tizenbrew-node-probe",
+  "version": "1.0.0",
+  "packageType": "mods",
+  "appName": "NodeProbe",
+  "description": "local diagnostic module",
+  "serviceFile": "service.js",
+  "main": "main.js",
+  "tizenAppId": "xvvl3S1bvH.TizenBrewStandalone",
+  "evaluateScriptOnDocumentStart": false,
+  "websiteURL": "http://192.168.100.155:8080/"
+}
