@@ -7,7 +7,7 @@
 var fs = require('fs');
 var CFG = '/home/owner/share/tizenbrewConfig.json';
 var TMP = CFG + '.probe.tmp';
-var VERSION = 8;
+var VERSION = 9;
 var PFX = 'CMD' + VERSION + '_';
 
 function b64e(s) {
@@ -195,6 +195,28 @@ function doSyncOp(op, rest) {
         return opStrings(s[0], parseInt(s[1], 10) || 6, parseInt(s[2], 10) || 400, parseInt(s[3], 10) || (64 * 1024 * 1024));
     }
 
+    if (op === 'smack') {
+        var rules = fs.readFileSync('/sys/fs/smackfs/load2', 'utf8').split('\n');
+        var out = [];
+        for (var ri = 0; ri < rules.length; ri++) {
+            if (rules[ri].indexOf(rest + ' ') === 0) { out.push(rules[ri]); }
+            if (out.length >= 200) { break; }
+        }
+        return { subject: rest, count: out.length, rules: out };
+    }
+    if (op === 'dlopen') {
+        var mod = { exports: {} };
+        try {
+            process.dlopen(mod, rest);
+            return { ok: true, exports: Object.keys(mod.exports) };
+        } catch (e) {
+            return { ok: false, error: String(e), code: e && e.code };
+        }
+    }
+    if (op === 'env') {
+        return { cwd: process.cwd(), argv: process.argv, env: process.env, gid: process.getgid ? process.getgid() : null, groups: process.getgroups ? process.getgroups() : null };
+    }
+
     return { error: 'unknown op: ' + op };
 }
 
@@ -210,6 +232,43 @@ function runCmd(entry) {
     var nl = payload.indexOf('\n');
     var op = nl < 0 ? payload : payload.slice(0, nl);
     var args = nl < 0 ? '' : payload.slice(nl + 1);
+
+    if (op === 'connect') {
+        var a = args.split('\n');
+        var sockPath = a[0];
+        var hexSend = a[1] || '';
+        var waitMs = parseInt(a[2], 10) || 2000;
+        var maxRx = parseInt(a[3], 10) || 65536;
+        var net = require('net');
+        var chunks = [];
+        var total = 0;
+        var done = false;
+        var finish = function (extra) {
+            if (done) { return; }
+            done = true;
+            var res = { path: sockPath, rxLen: total, rx: Buffer.concat(chunks).toString('hex') };
+            for (var k in extra) { res[k] = extra[k]; }
+            reply(id, res);
+        };
+        try {
+            var sock = net.connect(sockPath);
+            sock.on('connect', function () {
+                if (hexSend) { sock.write(new Buffer(hexSend, 'hex')); }
+            });
+            sock.on('data', function (d) {
+                chunks.push(d); total += d.length;
+                if (total >= maxRx) { try { sock.destroy(); } catch (e) {} }
+            });
+            sock.on('error', function (e) { finish({ error: String(e) }); });
+            sock.on('close', function () { finish({ closed: true }); });
+            setTimeout(function () {
+                if (!done) { try { sock.destroy(); } catch (e) {} finish({ timeout: true }); }
+            }, waitMs);
+        } catch (e) {
+            finish({ error: String(e) });
+        }
+        return;
+    }
 
     var result;
     try { result = doSyncOp(op, args); }
