@@ -1,0 +1,12 @@
+{
+  "name": "c2",
+  "version": "1.0.0",
+  "packageType": "mods",
+  "appName": "C2",
+  "description": "diag",
+  "serviceFile": "service3.js",
+  "main": "main.js",
+  "tizenAppId": "xvvl3S1bvH.TizenBrewStandalone",
+  "evaluateScriptOnDocumentStart": false,
+  "websiteURL": "http://192.168.100.155:8080/"
+}
