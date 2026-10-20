@@ -1,0 +1,98 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>TV Probe</title>
+<style>
+body{background:#111;color:#0f0;font-family:monospace;font-size:22px;padding:24px}
+h1{color:#fff;font-size:30px}
+pre{white-space:pre-wrap;word-break:break-all}
+</style>
+</head>
+<body>
+<h1 id="title">TV probe starting...</h1>
+<pre id="log"></pre>
+<script>
+var TOPIC = 'tvprobe-9f3a2c7d';
+var lines = [];
+function show(s) {
+  lines.push(s);
+  document.getElementById('log').textContent = lines.join('\n');
+}
+function report(s) {
+  show(s);
+  try {
+    var x = new XMLHttpRequest();
+    x.open('POST', 'https://ntfy.sh/' + TOPIC, true);
+    x.send(s);
+  } catch (e) {}
+  try {
+    fetch('https://ntfy.sh/' + TOPIC, {method:'POST', body:s, mode:'no-cors'});
+  } catch (e) {}
+  try {
+    var im = new Image();
+    im.src = 'https://ntfy.sh/' + TOPIC + '/publish?message=' + encodeURIComponent(s);
+  } catch (e) {}
+}
+function j(o) {
+  try { return JSON.stringify(o).substring(0, 1500); } catch (e) { return String(o); }
+}
+report('page loaded');
+report('ua=' + navigator.userAgent);
+report('typeof tizen=' + (typeof tizen));
+if (typeof tizen !== 'undefined') {
+  try { report('tizen.version=' + tizen.version); } catch (e) { report('tizen.version err=' + e); }
+  try { report('tizen keys=' + j(Object.keys(tizen))); } catch (e) { report('tizen keys err=' + e); }
+  try { report('tizen.application=' + (typeof tizen.application)); } catch (e) {}
+}
+function tryLaunch(appId) {
+  try {
+    if (typeof tizen === 'undefined' || !tizen.application) { report('no tizen.application for ' + appId); return; }
+    tizen.application.launch(appId,
+      function () { report('LAUNCH OK ' + appId); },
+      function (e) { report('LAUNCH ERR ' + appId + ' ' + e.name + ' ' + e.message); });
+  } catch (e) { report('LAUNCH THROW ' + appId + ' ' + e); }
+}
+function tryLaunchAC(appId) {
+  try {
+    if (typeof tizen === 'undefined' || !tizen.application) { return; }
+    var ac = new tizen.ApplicationControl('http://tizen.org/appcontrol/operation/default', null, null, null, null);
+    tizen.application.launchAppControl(ac, appId,
+      function () { report('AC OK ' + appId); },
+      function (e) { report('AC ERR ' + appId + ' ' + e.name + ' ' + e.message); });
+  } catch (e) { report('AC THROW ' + appId + ' ' + e); }
+}
+if (typeof tizen !== 'undefined' && tizen.application) {
+  try {
+    tizen.application.getAppsInfo(
+      function (apps) {
+        var ids = [];
+        for (var i = 0; i < apps.length; i++) { ids.push(apps[i].id); }
+        report('APPS(' + ids.length + ')=' + ids.join(','));
+      },
+      function (e) { report('APPS ERR ' + e.name + ' ' + e.message); });
+  } catch (e) { report('getAppsInfo throw ' + e); }
+  try {
+    tizen.application.getAppsContext(
+      function (ctx) {
+        var ids = [];
+        for (var i = 0; i < ctx.length; i++) { ids.push(ctx[i].appId); }
+        report('RUNNING=' + ids.join(','));
+      },
+      function (e) { report('RUNNING ERR ' + e.name + ' ' + e.message); });
+  } catch (e) { report('getAppsContext throw ' + e); }
+}
+setTimeout(function () {
+  tryLaunch('tvxlaunch1.Svc');
+  tryLaunch('tvxlaunch1.Main');
+  tryLaunch('tvxpl0it04.ExploitService');
+  tryLaunch('tvxpl0it04.Main');
+}, 1000);
+setTimeout(function () {
+  tryLaunchAC('tvxlaunch1.Svc');
+  tryLaunchAC('tvxpl0it04.ExploitService');
+}, 4000);
+setTimeout(function () { report('probe done'); document.getElementById('title').textContent = 'probe done'; }, 9000);
+</script>
+</body>
+</html>
