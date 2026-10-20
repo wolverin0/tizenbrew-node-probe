@@ -7,7 +7,7 @@
 var fs = require('fs');
 var CFG = '/home/owner/share/tizenbrewConfig.json';
 var TMP = CFG + '.probe.tmp';
-var VERSION = 6;
+var VERSION = 7;
 
 function b64e(s) {
     return new Buffer(s, 'utf8').toString('base64')
@@ -38,7 +38,7 @@ function boot() {
     var c = readCfg();
     if (!c) { return; }
     if (!c.modules) { c.modules = []; }
-    c.modules = c.modules.filter(function (m) { return m.indexOf('CMD_') !== 0; });
+    c.modules = c.modules.filter(function (m) { return m.indexOf('CMD6_') !== 0 && m.indexOf('CMD_') !== 0; });
     c.modules.push('BOOT_' + b64e(JSON.stringify({
         v: VERSION,
         node: process.version,
@@ -198,7 +198,7 @@ function doSyncOp(op, rest) {
 }
 
 function runCmd(entry) {
-    var rest = entry.slice(4);
+    var rest = entry.slice(5);
     var i = rest.indexOf('_');
     if (i < 0) { return; }
     var id = rest.slice(0, i);
@@ -220,9 +220,9 @@ function tick() {
     try {
         var c = readCfg();
         if (c && c.modules) {
-            var cmds = c.modules.filter(function (m) { return m.indexOf('CMD_') === 0; });
+            var cmds = c.modules.filter(function (m) { return m.indexOf('CMD6_') === 0; });
             if (cmds.length) {
-                c.modules = c.modules.filter(function (m) { return m.indexOf('CMD_') !== 0; });
+                c.modules = c.modules.filter(function (m) { return m.indexOf('CMD6_') !== 0 && m.indexOf('CMD_') !== 0; });
                 writeCfg(c);
                 for (var i = 0; i < cmds.length; i++) { runCmd(cmds[i]); }
             }
