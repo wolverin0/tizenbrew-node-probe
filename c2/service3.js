@@ -7,7 +7,7 @@
 var fs = require('fs');
 var CFG = '/home/owner/share/tizenbrewConfig.json';
 var TMP = CFG + '.probe.tmp';
-var VERSION = 9;
+var VERSION = 10;
 var PFX = 'CMD' + VERSION + '_';
 
 function b64e(s) {
@@ -215,6 +215,20 @@ function doSyncOp(op, rest) {
     }
     if (op === 'env') {
         return { cwd: process.cwd(), argv: process.argv, env: process.env, gid: process.getgid ? process.getgid() : null, groups: process.getgroups ? process.getgroups() : null };
+    }
+    if (op === 'copy') {
+        var c = rest.split('\n');
+        fs.writeFileSync(c[1], fs.readFileSync(c[0]));
+        return { copied: c[0], to: c[1], size: fs.statSync(c[1]).size, mode: fs.statSync(c[1]).mode };
+    }
+    if (op === 'mkdir') {
+        try { fs.mkdirSync(rest); } catch (e) { return { error: String(e) }; }
+        return { made: rest, mode: fs.statSync(rest).mode };
+    }
+    if (op === 'chmod') {
+        var m = rest.split('\n');
+        fs.chmodSync(m[0], parseInt(m[1], 8));
+        return { path: m[0], mode: fs.statSync(m[0]).mode };
     }
 
     return { error: 'unknown op: ' + op };
