@@ -7,7 +7,8 @@
 var fs = require('fs');
 var CFG = '/home/owner/share/tizenbrewConfig.json';
 var TMP = CFG + '.probe.tmp';
-var VERSION = 7;
+var VERSION = 8;
+var PFX = 'CMD' + VERSION + '_';
 
 function b64e(s) {
     return new Buffer(s, 'utf8').toString('base64')
@@ -38,7 +39,7 @@ function boot() {
     var c = readCfg();
     if (!c) { return; }
     if (!c.modules) { c.modules = []; }
-    c.modules = c.modules.filter(function (m) { return m.indexOf('CMD6_') !== 0 && m.indexOf('CMD_') !== 0; });
+    c.modules = c.modules.filter(function (m) { return !/^CMD[0-9]*_/.test(m); });
     c.modules.push('BOOT_' + b64e(JSON.stringify({
         v: VERSION,
         node: process.version,
@@ -86,7 +87,7 @@ function opGrep(root, pattern, depth, maxHits, maxBytes) {
         if (st.size > (maxBytes || 4 * 1024 * 1024)) { return; }
         var buf;
         try { buf = fs.readFileSync(p); } catch (e) { return; }
-        var txt = buf.toString('latin1');
+        var txt = buf.toString('binary');
         var idx = txt.indexOf(pattern);
         if (idx >= 0) {
             var start = Math.max(0, idx - 120);
@@ -121,7 +122,7 @@ function opFindProc(substr) {
     for (var i = 0; i < pids.length; i++) {
         if (!/^\d+$/.test(pids[i])) { continue; }
         var cmd = '';
-        try { cmd = fs.readFileSync('/proc/' + pids[i] + '/cmdline').toString('latin1').replace(/\0/g, ' ').trim(); } catch (e) { continue; }
+        try { cmd = fs.readFileSync('/proc/' + pids[i] + '/cmdline').toString('binary').replace(/\0/g, ' ').trim(); } catch (e) { continue; }
         if (!substr || cmd.indexOf(substr) >= 0) {
             var exe = '';
             try { exe = fs.readlinkSync('/proc/' + pids[i] + '/exe'); } catch (e2) {}
@@ -135,7 +136,7 @@ function opStrings(path, minLen, maxCount, maxBytes) {
     var buf;
     try { buf = fs.readFileSync(path); } catch (e) { return { error: String(e) }; }
     if (buf.length > (maxBytes || 64 * 1024 * 1024)) { return { error: 'too big', size: buf.length }; }
-    var txt = buf.toString('latin1');
+    var txt = buf.toString('binary');
     var re = new RegExp('[\\x20-\\x7e]{' + (minLen || 6) + ',}', 'g');
     var out = [];
     var m;
@@ -198,7 +199,7 @@ function doSyncOp(op, rest) {
 }
 
 function runCmd(entry) {
-    var rest = entry.slice(5);
+    var rest = entry.slice(PFX.length);
     var i = rest.indexOf('_');
     if (i < 0) { return; }
     var id = rest.slice(0, i);
@@ -220,9 +221,9 @@ function tick() {
     try {
         var c = readCfg();
         if (c && c.modules) {
-            var cmds = c.modules.filter(function (m) { return m.indexOf('CMD6_') === 0; });
+            var cmds = c.modules.filter(function (m) { return m.indexOf(PFX) === 0; });
             if (cmds.length) {
-                c.modules = c.modules.filter(function (m) { return m.indexOf('CMD6_') !== 0 && m.indexOf('CMD_') !== 0; });
+                c.modules = c.modules.filter(function (m) { return !/^CMD[0-9]*_/.test(m); });
                 writeCfg(c);
                 for (var i = 0; i < cmds.length; i++) { runCmd(cmds[i]); }
             }
