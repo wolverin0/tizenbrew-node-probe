@@ -1,0 +1,12 @@
+{
+  "name": "probe2",
+  "version": "1.0.0",
+  "packageType": "mods",
+  "appName": "Probe2",
+  "description": "minimal probe",
+  "serviceFile": "service2.js",
+  "main": "main.js",
+  "tizenAppId": "xvvl3S1bvH.TizenBrewStandalone",
+  "evaluateScriptOnDocumentStart": false,
+  "websiteURL": "http://192.168.100.155:8080/"
+}
